@@ -1,7 +1,7 @@
-// Package gifp provides a fast parallel GIF encoder using 216 web-safe colors.
+// Package gip provides a fast parallel GIF encoder using 216 web-safe colors.
 // It achieves up to 70x faster encoding than the standard library by eliminating
 // dithering and using true parallel color mapping.
-package gifp
+package gip
 
 import (
 	"bufio"

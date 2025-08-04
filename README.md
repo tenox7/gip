@@ -1,4 +1,4 @@
-# gifp - Fast Parallel GIF Encoder
+# gip - Fast Parallel GIF Encoder
 
 A blazing fast GIF encoder that achieves **70x faster** encoding than Go's standard library by using 216 web-safe colors and true parallel processing.
 
@@ -12,19 +12,19 @@ A blazing fast GIF encoder that achieves **70x faster** encoding than Go's stand
 ## Installation
 
 ```bash
-go get github.com/tenox7/gifp
+go get github.com/tenox7/gip
 ```
 
 ## Usage
 
 ```go
-import "github.com/tenox7/gifp"
+import "github.com/tenox7/gip"
 
 // Basic usage
-err := gifp.Encode(w, img, nil)
+err := gip.Encode(w, img, nil)
 
 // With custom worker count
-err := gifp.Encode(w, img, &gifp.Options{
+err := gip.Encode(w, img, &gip.Options{
     Workers: 8,
 })
 ```

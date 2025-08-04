@@ -1,4 +1,4 @@
-package gifp
+package gip
 
 import (
 	"bytes"
