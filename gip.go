@@ -1,6 +1,3 @@
-// Package gip provides a fast parallel GIF encoder using 216 web-safe colors.
-// It achieves up to 70x faster encoding than the standard library by eliminating
-// dithering and using true parallel color mapping.
 package gip
 
 import (
@@ -16,147 +13,153 @@ import (
 	"sync"
 )
 
-// FastGifLut maps 8-bit color values to 6 levels (0-5) for the 216 web-safe colors.
-// This creates a 6x6x6 color cube (216 colors) by quantizing each RGB component to 6 levels.
-var FastGifLut = [256]int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
+var FastGifLut = [256]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
 
-// Options configures the encoding parameters.
+var rLut [256]byte
+var gLut [256]byte
+var bLut [256]byte
+
+func init() {
+	for i := 0; i < 256; i++ {
+		rLut[i] = FastGifLut[i] * 36
+		gLut[i] = FastGifLut[i] * 6
+		bLut[i] = FastGifLut[i]
+	}
+}
+
 type Options struct {
-	// Workers is the number of parallel workers.
-	// Default: runtime.NumCPU().
 	Workers int
 }
 
-// Encode writes the Image m to w in GIF format using fast parallel encoding.
-// This encoder uses a fixed 216-color web-safe palette and performs true
-// parallel color mapping without dithering, resulting in 70x faster encoding.
 func Encode(w io.Writer, m image.Image, o *Options) error {
 	workers := runtime.NumCPU()
 	if o != nil && o.Workers > 0 {
 		workers = o.Workers
 	}
-	
+
 	b := m.Bounds()
 	if b.Dx() >= 1<<16 || b.Dy() >= 1<<16 {
 		return errors.New("gif: image is too large to encode")
 	}
-	
-	// Create paletted image with web-safe palette
+
 	pm := image.NewPaletted(b, palette.WebSafe)
-	
-	// Parallel color mapping without dithering
+
 	height := b.Dy()
 	rowsPerWorker := height / workers
 	if rowsPerWorker < 1 {
 		rowsPerWorker = 1
 		workers = height
 	}
-	
+
 	var wg sync.WaitGroup
-	
-	// Check if source is RGBA64
-	if i64, ok := m.(image.RGBA64Image); ok {
+
+	switch src := m.(type) {
+	case *image.NRGBA:
 		for i := 0; i < workers; i++ {
 			startY := b.Min.Y + i*rowsPerWorker
 			endY := startY + rowsPerWorker
 			if i == workers-1 {
 				endY = b.Max.Y
 			}
-			
 			wg.Add(1)
 			go func(sy, ey int) {
 				defer wg.Done()
 				for y := sy; y < ey; y++ {
+					srcOff := (y-src.Rect.Min.Y)*src.Stride + (b.Min.X-src.Rect.Min.X)*4
+					dstOff := (y-b.Min.Y)*pm.Stride
 					for x := b.Min.X; x < b.Max.X; x++ {
-						c := i64.RGBA64At(x, y)
-						r6 := FastGifLut[c.R>>8]
-						g6 := FastGifLut[c.G>>8]
-						b6 := FastGifLut[c.B>>8]
-						pm.SetColorIndex(x, y, uint8(36*r6+6*g6+b6))
+						pm.Pix[dstOff] = rLut[src.Pix[srcOff]] + gLut[src.Pix[srcOff+1]] + bLut[src.Pix[srcOff+2]]
+						srcOff += 4
+						dstOff++
 					}
 				}
 			}(startY, endY)
 		}
-	} else {
-		// Generic image interface
+	case *image.RGBA:
 		for i := 0; i < workers; i++ {
 			startY := b.Min.Y + i*rowsPerWorker
 			endY := startY + rowsPerWorker
 			if i == workers-1 {
 				endY = b.Max.Y
 			}
-			
 			wg.Add(1)
 			go func(sy, ey int) {
 				defer wg.Done()
 				for y := sy; y < ey; y++ {
+					srcOff := (y-src.Rect.Min.Y)*src.Stride + (b.Min.X-src.Rect.Min.X)*4
+					dstOff := (y-b.Min.Y)*pm.Stride
 					for x := b.Min.X; x < b.Max.X; x++ {
-						c := m.At(x, y)
-						r, g, b, _ := c.RGBA()
-						// RGBA() returns 16-bit values, we need 8-bit
-						r6 := FastGifLut[(r>>8)&0xff]
-						g6 := FastGifLut[(g>>8)&0xff]
-						b6 := FastGifLut[(b>>8)&0xff]
-						pm.SetColorIndex(x, y, uint8(36*r6+6*g6+b6))
+						pm.Pix[dstOff] = rLut[src.Pix[srcOff]] + gLut[src.Pix[srcOff+1]] + bLut[src.Pix[srcOff+2]]
+						srcOff += 4
+						dstOff++
+					}
+				}
+			}(startY, endY)
+		}
+	default:
+		for i := 0; i < workers; i++ {
+			startY := b.Min.Y + i*rowsPerWorker
+			endY := startY + rowsPerWorker
+			if i == workers-1 {
+				endY = b.Max.Y
+			}
+			wg.Add(1)
+			go func(sy, ey int) {
+				defer wg.Done()
+				for y := sy; y < ey; y++ {
+					dstOff := (y - b.Min.Y) * pm.Stride
+					for x := b.Min.X; x < b.Max.X; x++ {
+						r, g, bl, _ := m.At(x, y).RGBA()
+						pm.Pix[dstOff] = rLut[byte(r>>8)] + gLut[byte(g>>8)] + bLut[byte(bl>>8)]
+						dstOff++
 					}
 				}
 			}(startY, endY)
 		}
 	}
-	
+
 	wg.Wait()
-	
-	// Translate to (0,0) if needed
+
 	if pm.Rect.Min != (image.Point{}) {
 		dup := *pm
 		dup.Rect = dup.Rect.Sub(dup.Rect.Min)
 		pm = &dup
 	}
-	
-	return encodeGIF(w, pm, workers)
+
+	return encodeGIF(w, pm)
 }
 
-// encodeGIF writes a single-frame GIF
-func encodeGIF(w io.Writer, pm *image.Paletted, workers int) error {
+func encodeGIF(w io.Writer, pm *image.Paletted) error {
 	if len(pm.Palette) == 0 {
 		return errors.New("gif: cannot encode image block with empty palette")
 	}
 
-	bw := bufio.NewWriter(w)
-	
-	// Write header
-	if _, err := bw.WriteString("GIF89a"); err != nil {
-		return err
-	}
+	bw := bufio.NewWriterSize(w, 32*1024)
 
-	// Write Logical Screen Descriptor
+	bw.WriteString("GIF89a")
+
 	b := pm.Bounds()
 	writeUint16(bw, uint16(b.Dx()))
 	writeUint16(bw, uint16(b.Dy()))
 
-	// Calculate padded palette size
 	paddedSize := 1
 	for paddedSize < len(pm.Palette) && paddedSize < 256 {
 		paddedSize <<= 1
 	}
-	
-	// Packed field
-	bw.WriteByte(0x80 | uint8(log2(paddedSize))) // fColorTable | size
-	bw.WriteByte(0x00) // Background Color Index
-	bw.WriteByte(0x00) // Pixel Aspect Ratio
 
-	// Write Global Color Table
+	bw.WriteByte(0x80 | uint8(log2(paddedSize)))
+	bw.WriteByte(0x00)
+	bw.WriteByte(0x00)
+
 	writeColorTable(bw, pm.Palette, paddedSize)
 
-	// Write Image Descriptor
-	bw.WriteByte(0x2C) // Image Separator
-	writeUint16(bw, 0) // Left
-	writeUint16(bw, 0) // Top
+	bw.WriteByte(0x2C)
+	writeUint16(bw, 0)
+	writeUint16(bw, 0)
 	writeUint16(bw, uint16(b.Dx()))
 	writeUint16(bw, uint16(b.Dy()))
-	bw.WriteByte(0x00) // No local color table, no interlace, etc.
+	bw.WriteByte(0x00)
 
-	// Determine litWidth
 	litWidth := 8
 	n := len(pm.Palette)
 	if n > 0 {
@@ -164,68 +167,44 @@ func encodeGIF(w io.Writer, pm *image.Paletted, workers int) error {
 		}
 	}
 
-	// Write LZW minimum code size
 	bw.WriteByte(uint8(litWidth))
 
-	// Compress and write image data
-	if err := writeLZWData(bw, pm, litWidth, workers); err != nil {
+	if err := writeLZWData(bw, pm, litWidth); err != nil {
 		return err
 	}
 
-	// Write trailer
-	bw.WriteByte(0x00) // Block terminator
-	bw.WriteByte(0x3B) // GIF trailer
+	bw.WriteByte(0x00)
+	bw.WriteByte(0x3B)
 
 	return bw.Flush()
 }
 
-// writeLZWData writes the LZW-compressed image data
-func writeLZWData(w io.Writer, pm *image.Paletted, litWidth int, workers int) error {
-	b := pm.Bounds()
-	dx := b.Dx()
-	dy := b.Dy()
+func writeLZWData(w io.Writer, pm *image.Paletted, litWidth int) error {
+	dx := pm.Bounds().Dx()
+	dy := pm.Bounds().Dy()
 
-	// Prepare image data in parallel
-	stripHeight := dy / workers
-	if stripHeight < 1 {
-		stripHeight = 1
-		workers = dy
-	}
-	
-	imageData := make([]byte, dx*dy)
-	var wg sync.WaitGroup
-	
-	for i := 0; i < workers; i++ {
-		startY := i * stripHeight
-		endY := startY + stripHeight
-		if i == workers-1 {
-			endY = dy
+	data := pm.Pix
+	if pm.Stride != dx {
+		data = make([]byte, dx*dy)
+		for y := 0; y < dy; y++ {
+			copy(data[y*dx:(y+1)*dx], pm.Pix[y*pm.Stride:y*pm.Stride+dx])
 		}
-		
-		wg.Add(1)
-		go func(sy, ey int) {
-			defer wg.Done()
-			for y := sy; y < ey; y++ {
-				copy(imageData[y*dx:(y+1)*dx], pm.Pix[y*pm.Stride:y*pm.Stride+dx])
-			}
-		}(startY, endY)
+	} else {
+		data = pm.Pix[:dx*dy]
 	}
-	
-	wg.Wait()
 
-	// Compress the data
 	bw := &blockWriter{w: w}
 	lzww := lzw.NewWriter(bw, lzw.LSB, litWidth)
-	
-	if _, err := lzww.Write(imageData); err != nil {
+
+	if _, err := lzww.Write(data); err != nil {
 		lzww.Close()
 		return err
 	}
-	
+
 	if err := lzww.Close(); err != nil {
 		return err
 	}
-	
+
 	return bw.close()
 }
 
@@ -273,19 +252,15 @@ func writeUint16(w io.Writer, v uint16) error {
 }
 
 func writeColorTable(w io.Writer, p color.Palette, paddedSize int) error {
-	for i := 0; i < paddedSize; i++ {
-		if i < len(p) {
-			c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
-			if _, err := w.Write([]byte{c.R, c.G, c.B}); err != nil {
-				return err
-			}
-		} else {
-			if _, err := w.Write([]byte{0, 0, 0}); err != nil {
-				return err
-			}
-		}
+	var buf [768]byte
+	for i := 0; i < paddedSize && i < len(p); i++ {
+		c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
+		buf[i*3] = c.R
+		buf[i*3+1] = c.G
+		buf[i*3+2] = c.B
 	}
-	return nil
+	_, err := w.Write(buf[:paddedSize*3])
+	return err
 }
 
 // log2 returns the log2 of the smallest power of 2 >= x
